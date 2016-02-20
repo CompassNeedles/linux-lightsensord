@@ -166,10 +166,14 @@ int main(int argc, char **argv)
 	val.cur_intensity = MAX_LI + 1;
 	retval = get(&val);
 
-	if (retval <= 0 || retval >= MAX_LI)
+	if (retval)
 		printf("Error[%i] getting: %s.\n", retval, strerror(errno));
+	else if (val.cur_intensity <= 0 || val.cur_intensity > MAX_LI)
+		printf("Error: got invalid light intensity with value %i.\n",
+			val.cur_intensity);
 	else
-		printf("Got current light intensity successfully.\n");
+		printf("Got current light intensity successfully with value %i.\n",
+			val.cur_intensity);
 
 	daemon_mode();
 
@@ -185,7 +189,7 @@ int main(int argc, char **argv)
 		val.cur_intensity = MAX_LI + 1;
 		retval = get(&val);
 
-		if (retval <= 0 || retval >= MAX_LI) /* Again */
+		if (retval || val.cur_intensity <= 0 || val.cur_intensity > MAX_LI)
 			return EXIT_FAILURE;
 	}
 	/* You will be able to see by doing cat /proc/kmsg that the daemon
