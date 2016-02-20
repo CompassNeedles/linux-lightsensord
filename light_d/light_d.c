@@ -22,10 +22,10 @@
 #define EMULATOR 					0
 #define DEVICE 						1
 
-#define LIGHT_INTENSITY_SENSOR 		5
+#define LIGHT_INTENSITY_SENSOR  	5
 
-#define TIME_INTERVAL 				2000000
-#define MAX_LI						3276800
+#define TIME_INTERVAL   			2000000
+#define MAX_LI  					3276800
 
 #define __NR_set_light_intensity	378
 #define __NR_get_light_intensity	379
@@ -51,57 +51,40 @@ static int poll_sensor_data(struct sensors_poll_device_t *sensors_device);
 
 void daemon_mode()
 {
-	pid_t fork_temp, fork_daemon, daemon_pid;
+	pid_t daemon;
 
 	printf("Starting new daemon process.\n");
-	printf("Make main's child (semi-daemon) fork the daemon because\n");
 
-	/* One source amongst many others */
-	printf("http://www.dsm.fordham.edu/cgi-bin/man-cgi.pl?" \
-		"topic=DAEMON&ampsect=7\n");
+	printf("Forking daemon.\n");
+	daemon = fork();
 
-	printf("And also because we lose nothing if we don't.\n");
+	if (daemon == -1)
+		printf("Error forking daemon: %s\n", strerror(errno));
 
-	printf("Forking main child.\n");
-	fork_temp = fork();
-
-	if (fork_temp == -1)
-		printf("Error forking child: %s\n", strerror(errno));
-
-	if (fork_temp > 0) {
-		printf("Main (parent process) exiting.\n");
+	if (daemon > 0) {
+		printf("Parent exiting. Daemon continues main execution.\n");
 		exit(EXIT_SUCCESS);
 	}
+
+	daemon = getpid();
+	printf("We got the daemon's pid: %i.\n", daemon);
+	printf("Check by doing command line $(ps).\n");
+
+	printf("Before closing file descriptors...\n");
+
+	printf("Disabling file operations by resetting umask to 0.\n");
+	umask(0);
+
+	printf("Changing working directory to root.\n");
+	if (chdir("/") == -1)
+		printf("Error changing current directory to root: %s\n",
+			strerror(errno));
 
 	printf("Detach from terminal and create independent session\n");
 	printf("with child as leader.\n");
 	if (setsid() == -1)
 		printf("Error setting session ID: %s\n", strerror(errno));
 
-	printf("Forking daemon process.\n");
-	fork_daemon = fork();
-
-	if (fork_temp == -1)
-		printf("Error forking daemon: %s\n", strerror(errno));
-
-	if (fork_daemon > 0) {
-		printf("Child exiting. Daemon continues main execution.\n");
-		exit(EXIT_SUCCESS);
-	}
-
-	daemon_pid = getpid();
-	printf("We got the daemon's pid: %i.\n", daemon_pid);
-	printf("Check by doing command line $(ps).\n");
-
-	printf("Changing directory to root.\n");
-	if (chdir("/") == -1)
-		printf("Error changing current directory to root: %s\n",
-			strerror(errno));
-
-	printf("Disabling file operations by resetting umask to 0.\n");
-	umask(0);
-
-	printf("Closing file descriptors.\n");
 	if (close(0) == -1) {
 		printf("Error closing stdin: %s\n", strerror(errno));
 	}
@@ -147,16 +130,16 @@ int main(int argc, char **argv)
 
 	struct sensors_module_t *sensors_module = NULL;
 	struct sensors_poll_device_t *sensors_device = NULL;
-	
-	daemon_mode();
 
-	printf("Opening sensors...\n"); /* Won't print? */
+	printf("Opening sensors...\n");
 	if (open_sensors(&sensors_module,
 			 &sensors_device) < 0) {
 		printf("open_sensors failed\n");
 		return EXIT_FAILURE;
 	}
 	enumerate_sensors(sensors_module);
+
+	daemon_mode();
 
 	while (1) { /* Success */
 		usleep(TIME_INTERVAL);
@@ -173,6 +156,10 @@ int main(int argc, char **argv)
 		if (retval <= 0 || retval >= MAX_LI) /* Again */
 			return EXIT_FAILURE;
 	}
+	/* You will be able to see by doing cat /proc/kmsg that the daemon
+	 * exits with status 1 (EXIT_FAILURE) whereas the parent exits with
+	 * status 0 (EXIT_SUCCESS). Debug in kernel.
+	 */
 }
 
 /*
