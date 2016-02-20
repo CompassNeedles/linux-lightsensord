@@ -258,6 +258,37 @@ static inline int do_wait(struct ev *ev)
 	}
 	if (ev->destroy)
 		kfree(ev); /* Destroy */
+	else if (retval > -1)
+		ev->no_satisfaction = 1;
+		/* If -EINTR we expect that no_satifaction is equal to 1.
+			as this occurs inside the while loop, we do not modify
+			this value.
+		*/
+
+	/* We have two choices/models, which may be racy or lagging. We
+		consider the differences:
+
+		1. Have update_event_stats switch off no_satisfaction (0)
+			indefinitely many times - and during which more
+			processes can attach to the event and wait, until do_wait
+			executes and sets it back to 1. Possible issues:
+			update_event_stats may be detecting an event during the
+			execution of do_wait which will then annul the event.
+			Except the lock must be held, which will prevent these events
+			from interfering and data races to occur.
+
+		2. Make no_satisfaction negative, and keep waking up events as
+			many times as necessary to make no_satisfaction positive
+			again. First consideration: as events are being woken, it is
+			possible for the event requirements to become unsatisfactory
+			while still having processes block and be woken? Second
+			consideration: the events lock must be held which not only makes
+			wait and signal mutually exclusive, but also reduces choice 2
+			to choice 1 since we expect no_satisfaction will simply switch
+			beween values 1 and 0. In other words, no data races between
+			two signalling processes (the second must wait for the first
+			to release the events lock).
+	 */
 
 	spin_unlock(&ev_lock);
 	return retval;
