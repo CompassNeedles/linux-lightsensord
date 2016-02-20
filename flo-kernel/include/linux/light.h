@@ -1,6 +1,9 @@
 #ifndef _LIGHT_H
 #define _LIGHT_H
 
+#include <linux/list.h>
+#include <linux/wait.h>
+
 #define MAX_LI  3276800
 #define NOISE   20
 #define WINDOW  20
@@ -34,9 +37,12 @@ struct event_requirements {
             on this event
         .head: list_head entry, in "global" list of user-created events,
             also used as iterator
-        .queue: wait_queue_head entry, in the wait queue dedicated to this
-            event, of all the userspace processes waiting to be woken
-            on this event
+        .queue: reference to wait queue struct from wait.h dedicated to this
+            event, on which all userspace processes waiting to be woken
+            will be attached, as a list_head entry
+        .no_satisfaction: indicates that the event requirements have not
+            yet been met
+        .destroy: indicates that the event should be destroyed when woken
     }
 */
 struct ev {
@@ -44,6 +50,8 @@ struct ev {
     struct event_requirements reqs;
     struct list_head ev_h;
     wait_queue_head_t queue;
+    int no_satisfaction;
+    int destroy;
 };
 
 #endif

@@ -1,17 +1,16 @@
 #include <linux/light.h>
 #include <linux/syscalls.h>
-#include <linux/list.h>
-#include <linux/wait.h>
+#include <linux/poll.h>
+#include <linux/slab.h>
 
 static struct light_intensity k_li = {
-    .cur_intensity = 0;
+	.cur_intensity = 0,
 };
 
 static struct list_head *events = NULL;
-#define get_event(struct list_head *v) \
-    container_of(v, struct ev, ev_h);
+#define get_event(v)		container_of(v, struct ev, ev_h)
 
-static struct light_intesity li_buf[WINDOW];
+static struct light_intensity li_buf[WINDOW];
 static int curr = 0;
 static int nr_readings = 0;
 
@@ -26,10 +25,10 @@ static int nr_readings = 0;
  * Priorities:
  * - Destroy (events lock: prioritize the write operation).
  * - Signal (li_buf lock:   first writes then reads; concurrency/SMP an
-    issue. Prioritize reading to allow previous call to complete if
-    signal() acquires lock twice - else doesn't matter since signal()
-    is the only function accessing li_buf.
-             k_li lock:     prioritize the write operation).
+	issue. Prioritize reading to allow previous call to complete if
+	signal() acquires lock twice - else doesn't matter since signal()
+	is the only function accessing li_buf.
+			 k_li lock:     prioritize the write operation).
  * - Wait (Destroy/Signal both prioritize the write operation).
  * - Create (Again, writing is prioritized).
  *
@@ -60,29 +59,29 @@ DEFINE_SPINLOCK(bf_lock);
  * syscall number 378
  */
 SYSCALL_DEFINE1(set_light_intensity, struct light_intensity __user *,
-    user_light_intensity)
+	user_light_intensity)
 {
-    if (get_current_user()->uid != 0)
-        return -EACCES;
+	if (get_current_user()->uid != 0)
+		return -EACCES;
 
-    if (user_light_intensity == NULL)
-        return -EINVAL;
+	if (user_light_intensity == NULL)
+		return -EINVAL;
 
-    if (user_light_intensity->cur_intensity <= 0 ||
-        user_light_intensity->cur_intensity > MAX_LI)
-        return -EINVAL;
+	if (user_light_intensity->cur_intensity <= 0 ||
+		user_light_intensity->cur_intensity > MAX_LI)
+		return -EINVAL;
 
 
-    spin_lock(&li_lock);
-    if (copy_from_user(&k_li, user_light_intensity, 
-            sizeof(struct light_intensity))) {
+	spin_lock(&li_lock);
+	if (copy_from_user(&k_li, user_light_intensity, 
+			sizeof(struct light_intensity))) {
 
-        spin_unlock(&li_lock);
-        return -EFAULT;
-    }
+		spin_unlock(&li_lock);
+		return -EFAULT;
+	}
 
-    spin_unlock(&li_lock);
-    return 0;
+	spin_unlock(&li_lock);
+	return 0;
 }
 
 /*
@@ -98,21 +97,21 @@ SYSCALL_DEFINE1(set_light_intensity, struct light_intensity __user *,
  * syscall number 379
  */
 SYSCALL_DEFINE1(get_light_intensity, struct light_intensity __user *,
-    user_light_intensity)
+	user_light_intensity)
 {
-    if (!user_light_intensity)
-        return -EINVAL;
+	if (!user_light_intensity)
+		return -EINVAL;
 
-    spin_lock(&li_lock);
-    if (copy_to_user(user_light_intensity, &k_intensity,
-            sizeof(struct light_intensity))) {
+	spin_lock(&li_lock);
+	if (copy_to_user(user_light_intensity, &k_li,
+			sizeof(struct light_intensity))) {
 
-        spin_unlock(&li_lock);
-        return -EFAULT;
-    }
+		spin_unlock(&li_lock);
+		return -EFAULT;
+	}
 
-    spin_unlock(&li_lock);
-    return 0;
+	spin_unlock(&li_lock);
+	return 0;
 }
 
 /*
@@ -125,67 +124,77 @@ SYSCALL_DEFINE1(get_light_intensity, struct light_intensity __user *,
  */
 SYSCALL_DEFINE1(light_evt_create, struct event_requirements *, intensity_params)
 {
-    int retval = 0;
-    struct ev *ev;
+	int retval = 0;
+	struct ev *ev;
 
-    if (!intensity_params)
-        return -EINVAL;
+	if (!intensity_params)
+		return -EINVAL;
 
-    ev = kmalloc(sizeof(*ev), GFP_KERNEL);
+	ev = kmalloc(sizeof(*ev), GFP_KERNEL);
 
-    if (!ev)
-        return -ENOMEM;
+	if (!ev)
+		return -ENOMEM;
 
-    if (copy_from_user(&ev->reqs, intensity_params,
-        sizeof(struct event_requirements))) {
-        kfree(new_event);
-        return -EFAULT;
-    }
+	if (copy_from_user(&ev->reqs, intensity_params,
+		sizeof(struct event_requirements))) {
+		kfree(ev);
+		return -EFAULT;
+	}
 
-    if (events)
-        ev->id = get_event(events)->id + 1;
-    else
-        ev->id = 1;
-    retval = ev->id;
-    LIST_HEAD_INIT(ev->ev_h);
-    DECLARE_WAITQUEUE(queue);
+	if (ev->reqs.req_intensity 	<=	0		||
+		ev->reqs.req_intensity 	>	MAX_LI	||
+		ev->reqs.frequency 		<= 0		||
+		ev->reqs.frequency 		>	WINDOW) {
+		kfree(ev);
+		return -EINVAL;
+	}
 
-    spin_lock(&ev_lock);
-    if (events)
-        list_add_tail(ev, events);
-    events = ev;
-    spin_unlock(&ev_lock);
+	if (events)
+		ev->id = get_event(events)->id + 1;
+	else
+		ev->id = 1;
+	retval = ev->id;
+	INIT_LIST_HEAD(&ev->ev_h);
+	init_waitqueue_head(&ev->queue);
+	ev->no_satisfaction = 1;
+	ev->destroy = 0;
 
-    /* Could ev be destroyed right before execution of the next line?
-     * The Linux scheduler is preemptive and hardware interrupts are
-     * possible. Let's not risk it.
-     */
-    return retval;
+	spin_lock(&ev_lock);
+	if (events)
+		list_add_tail(&ev->ev_h, events);
+	events = &ev->ev_h;
+	spin_unlock(&ev_lock);
+
+	/* Could ev be destroyed right before execution of the next line?
+	 * The Linux scheduler is preemptive and hardware interrupts are
+	 * possible. Let's not risk it.
+	 */
+	return retval;
 }
 
 static inline struct list_head *search_event_by_id(int event_id)
 {
-    struct list_head *v = events;
+	struct list_head *v = events;
 
-    if (!v)
-        return ERR_PTR(-EFAULT);
+	if (!v)
+		return ERR_PTR(-EINVAL); /* None created */
 
-    spin_lock(&ev_lock); /* Reading (i.e. reader) must be exclusive */
+	spin_lock(&ev_lock); /* Reading (i.e. reader) must be exclusive */
 
-    while(get_event(v)->id != event_id) {
-        v = v->next;
+	while(get_event(v)->id != event_id) {
+		v = v->next;
 
-        if (v == events) {
-            spin_unlock(&ev_lock);
-            return ERR_PTR(-EINVAL); /* Iterated through entire list */
+		if (v == events) {
+			spin_unlock(&ev_lock);
+			return ERR_PTR(-EINVAL); /* Iterated through entire list */
 
-        } else if (!v) {
-            printk(KERN_CRIT "ERROR LIGHT EVENTS: LIST CORRUPTION.\n");
-            spin_unlock(&ev_lock);
-            return ERR_PTR(-EFAULT);
-        }
-    }
-    return v;
+		} else if (!v) {
+			printk(KERN_CRIT "ERROR LIGHT EVENTS: LIST CORRUPTION.\n");
+			spin_unlock(&ev_lock);
+			return ERR_PTR(-EFAULT);
+		}
+	}
+	return v;
 }
 
 /*
@@ -197,51 +206,61 @@ static inline struct list_head *search_event_by_id(int event_id)
  */
 SYSCALL_DEFINE1(light_evt_destroy, int, event_id)
 {
-    struct ev *ev;
-    struct list_head *v = search_event_by_id(event_id);
+	struct ev *ev;
+	struct list_head *v = search_event_by_id(event_id);
 
-    if (IS_ERR(v))
-        return PTR_ERR(v);
+	if (IS_ERR(v))
+		return PTR_ERR(v);
 
-    list_del(v);
-    spin_unlock(&ev_lock);
-    /* The event has been removed from the "global" list and can no
-     * longer be accessed by other callers. Next and prev have been
-     * been put off but the pointer value itself is not changed.
-     */
+	if (events == v) {
+		if (!list_empty(v)) {
+			events = events->next;
+		} else {
+			events = NULL;
+		}
+	}
+	list_del(v);
+	spin_unlock(&ev_lock);
+	/* The event has been removed from the "global" list and can no
+	 * longer be accessed by other callers. Next and prev have been
+	 * been put off but the pointer value itself is not changed.
+	 */
 
-    ev = get_event(v);
-    ev->destroy = 1; /* True */
-    wake_up_all(&ev->queue);
-    return 0;
+	ev = get_event(v);
+	ev->destroy = 1; /* True */
+	wake_up_all(&ev->queue);
+	return 0;
 }
 
-static inline int do_wait(struct ev *ev, wait_queue_head_t *w)
+static inline int do_wait(struct ev *ev)
 {
-    int retval = 1;
+	int retval = 1;
 
-    while (ev->no_satisfaction && !ev->destroy) {
-        prepare_to_wait(&ev->queue, w, TASK_INTERRUPTIBLE);
-        if (retval)
-            retval = 0;
+	/* New wait queue entry - works just like list_head. */
+	DEFINE_WAIT(w);
 
-        if (signal_pending(current)) {
-            retval = -EINTR;
-            break;
-        }
+	while (ev->no_satisfaction && !ev->destroy) {
+		prepare_to_wait(&ev->queue, &w, TASK_INTERRUPTIBLE);
+		if (retval)
+			retval = 0;
 
-        spin_unlock(&ev_lock); /* Unlock before sleep */
-        schedule();
-        spin_lock(&ev_lock); /* Lock while reading event */
-    }
-    if (retval < 1) {
-        finish_wait(&ev->queue, w); /* Dequeue */
-    }
-    if (ev->destroy)
-        kfree(ev); /* Destroy */
+		if (signal_pending(current)) {
+			retval = -EINTR;
+			break;
+		}
 
-    spin_unlock(&ev_lock);
-    return retval;
+		spin_unlock(&ev_lock); /* Unlock before sleep */
+		schedule();
+		spin_lock(&ev_lock); /* Lock while reading event */
+	}
+	if (retval < 1) {
+		finish_wait(&ev->queue, &w); /* Dequeue */
+	}
+	if (ev->destroy)
+		kfree(ev); /* Destroy */
+
+	spin_unlock(&ev_lock);
+	return retval;
 }
 
 /*
@@ -254,119 +273,131 @@ static inline int do_wait(struct ev *ev, wait_queue_head_t *w)
  */
 SYSCALL_DEFINE1(light_evt_wait, int, event_id)
 {
-    struct list_head *v = search_event_by_id(event_id);
+	struct list_head *v = search_event_by_id(event_id);
 
-    if (IS_ERR(v))
-        return PTR_ERR(v);
+	if (IS_ERR(v))
+		return PTR_ERR(v);
 
-    /* New wait queue entry - works just like list_head. */
-    DEFINE_WAIT(wait);
-
-    return do_wait(get_event(v), &wait);
+	return do_wait(get_event(v));
 }
 
 
-/* The kernel has a call table for syscalls in which all these
- * inline functions can fit nicely.
+/* The kernel has a call table for syscalls into which all these
+ * inline functions can unfold and fit nicely.
  */
 static inline int do_count(struct event_requirements *reqs)
 {
-    int i = 0, reading, count = reqs->frequency;
-    for ( ; i > -nr_readings; --i) {
+	int i = 0, reading, count = reqs->frequency;
+	for ( ; i > -nr_readings; --i) {
 
-        if (curr + i < 0)
-            reading = li_buf[curr + i + WINDOW].cur_intensity;
-        else
-            reading = li_buf[curr + i].cur_intensity;
+		if (curr + i < 0)
+			reading = li_buf[curr + i + WINDOW].cur_intensity;
+		else
+			reading = li_buf[curr + i].cur_intensity;
 
-        if (reading > reqs->req_intensity - NOISE) {
-            if (!--count)
-                return 1;
-        }
-    }
-    /* We could also update largest_event_frequency's req_intensity
-     * and largest_event_req_intensity's frequency here, if either
-     * have larger "counterparts".
-     */
-    return 0;
+		if (reading > reqs->req_intensity - NOISE) {
+			if (!--count)
+				return 1;
+		}
+	}
+	/* We could also update largest_event_frequency's req_intensity
+	 * and largest_event_req_intensity's frequency here, if either
+	 * have larger "counterparts".
+	 */
+	return 0;
 }
 
-static inline void update_event_stats(void)
+static inline int update_event_stats(void)
 {
-    int signal_event = 0, retval = 0;
-    struct list_head *v = events;
-    struct ev *ev;
-    struct event_requirements r;
+	int signal_event = 0;
+	struct list_head *v = events;
+	struct ev *ev;
+	struct event_requirements r;
 
-    /* A minor optimization */
-    int largest_event_frequency = 0;
-    int its_req_intensity = 0;
-    int largest_event_req_intensity = 0;
-    int its_frequency = 0;
+	/* A minor optimization */
+	int largest_event_frequency = 0;
+	int its_req_intensity = 0;
+	int largest_event_req_intensity = 0;
+	int its_frequency = 0;
 
-    spin_lock(&ev_lock);
+	spin_lock(&ev_lock);
 
-    while (1) {
-        ev = get_event(v);
-        r = ev->reqs;
+	while (v) {
+		ev = get_event(v);
 
-        if (r.req_intensity <= largest_event_req_intensity  &&
-            r.frequency     <= its_frequency                ||
-            r.frequency     <= largest_event_frequency      &&
-            r.req_intensity <= its_req_intensity)
-            signal_event = 1;
-        else
-            signal_event = do_count(&r);
+		if (!ev) {
+			v = NULL;
+			break;
+		}
+		r = ev->reqs;
 
-        if (signal_event) {
+		if ((r.req_intensity <= largest_event_req_intensity  &&
+			r.frequency     <= its_frequency                )||
+			(r.frequency     <= largest_event_frequency      &&
+			r.req_intensity <= its_req_intensity))
+			signal_event = 1;
+		else
+			signal_event = do_count(&r);
 
-            ev->no_satisfaction = 0;
-            wake_up_all(&ev->queue);
+		if (signal_event) {
 
-            if (r.req_intensity <=  largest_event_req_intensity &&
-                r.frequency     >   its_frequency)
+			ev->no_satisfaction = 0;
+			wake_up_all(&ev->queue);
 
-                its_frequency = r.frequency;
+			if (r.req_intensity <=  largest_event_req_intensity &&
+				r.frequency     >   its_frequency)
 
-            if (r.frequency     <=  largest_event_frequency     &&
-                r.req_intensity >   its_req_intensity)
+				its_frequency = r.frequency;
 
-                its_req_intensity = r.req_intensity;
-        }
+			if (r.frequency     <=  largest_event_frequency     &&
+				r.req_intensity >   its_req_intensity)
 
-        v = v->next;
-        if (v == events)
-            break;
-    }
+				its_req_intensity = r.req_intensity;
+		}
+
+		v = v->next;
+		if (v == events)
+			break;
+	}
+	spin_unlock(&ev_lock);
+
+	if (!v)
+		return -EFAULT;
+
+	return 0;
 }
 
 /* Do not use without holding the li_lock.
  */
-static inline int update_buffer(void)
+static inline int update_buffer(int val)
 {
-    int retval = 0;
-    spin_lock(&bf_lock);
+	int retval;
+	spin_lock(&bf_lock);
 
-    /* How easy would it be to turn this into a fixed size BST */
-    curr = (curr + 1) % WINDOW;
-    li_buf[curr] = k_li.cur_intensity;
+	/* How easy would it be to turn this into a fixed size BST */
+	curr = (curr + 1) % WINDOW;
+	li_buf[curr].cur_intensity = val;
 
-    if (nr_readings < WINDOW-1)
-        ++nr_readings;
+	if (nr_readings < WINDOW-1)
+		++nr_readings;
 
-    retval = update_event_stats();
-    /* We want to make sure to update event stats at least once every
-        WINDOW light intensity updates. Otherwise, we may be missing out
-        on events. A minimum frequency of 1 is allowed, and in that
-        case, it is optimal to update stats at every light intensity
-        update. Otherwise, we can use a semaphore initialized to
-        <= WINDOW to update the buffer, ignoring race conditions between
-        event stats (that may miss out on signaling an event) and buffer
-        updates. This is a tradeoff.
-     */
+	retval = update_event_stats();
+	/* We want to make sure to update event stats at least once every
+		WINDOW light intensity updates. Otherwise, we may be missing out
+		on events. A minimum frequency of 1 is allowed, and in that
+		case, it is optimal to update stats at every light intensity
+		update. Otherwise, we can use a semaphore initialized to
+		<= WINDOW to update the buffer, ignoring race conditions between
+		event stat (which may cause events to go undetected) and buffer
+		updates. This is a tradeoff.
+	 */
 
-    spin_unlock(&bf_lock);
-    return retval;
+	/* We can lock before update_event_stats if we copy the buffer and
+		pass it on to update_event_stats (after which we destroy the
+		copy). Overall there is a time-space-accuracy tradeoff.
+	 */
+	spin_unlock(&bf_lock);
+	return retval;
 }
 
 /*
@@ -382,31 +413,30 @@ static inline int update_buffer(void)
  * system call number 382
  */
 SYSCALL_DEFINE1(light_evt_signal, struct light_intensity __user *,
-    user_light_intensity)
+	user_light_intensity)
 {
-    struct list_head *v = events;
-    int retval = 0;
+	int update_value;
 
-    if (get_current_user()->uid != 0)
-        return -EACCES;
+	if (get_current_user()->uid != 0)
+		return -EACCES;
 
-    if (user_light_intensity == NULL)
-        return -EINVAL;
+	if (user_light_intensity == NULL)
+		return -EINVAL;
 
-    if (user_light_intensity->cur_intensity <= 0 ||
-        user_light_intensity->cur_intensity > MAX_LI)
-        return -EINVAL;
+	if (user_light_intensity->cur_intensity <= 0 ||
+		user_light_intensity->cur_intensity > MAX_LI)
+		return -EINVAL;
 
-    spin_lock(&li_lock);
-    if (copy_from_user(&k_li, user_light_intensity, 
-            sizeof(struct light_intensity))) {
+	spin_lock(&li_lock);
+	update_value = copy_from_user(&k_li, user_light_intensity, 
+			sizeof(struct light_intensity));
 
-        spin_unlock(&li_lock);
-        return -EFAULT;
-    }
+	if (!update_value) {
+		spin_unlock(&li_lock);
+		return -EFAULT;
+	}
+	update_value = k_li.cur_intensity;
+	spin_unlock(&li_lock);
 
-    retval = update_buffer();
-    spin_unlock(&li_lock);
-
-    return retval;
+	return update_buffer(update_value);
 }
