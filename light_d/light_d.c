@@ -16,6 +16,9 @@
 #include <hardware/sensors.h>
 #include <errno.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
+#include <sys/signal.h>
+
 #include "../flo-kernel/include/linux/akm8975.h" 
 #include "light.h"
 
@@ -51,7 +54,7 @@ static int poll_sensor_data(struct sensors_poll_device_t *sensors_device);
 
 void daemon_mode()
 {
-	pid_t daemon;
+	int daemon, parent = getpid();
 
 	printf("Starting new daemon process.\n");
 
@@ -62,28 +65,37 @@ void daemon_mode()
 		printf("Error forking daemon: %s\n", strerror(errno));
 
 	if (daemon > 0) {
-		printf("Parent exiting. Daemon continues main execution.\n");
-		exit(EXIT_SUCCESS);
+		/* It is the parent exiting that must remit shell command line
+		 * to the user. The child should not continue printing after
+		 * this happens. */
+		daemon = -1;
+		wait(&daemon);
+		printf("Error: parent waited for daemon to terminate.\n");
+		exit(EXIT_FAILURE);
 	}
 
 	daemon = getpid();
 	printf("We got the daemon's pid: %i.\n", daemon);
-	printf("Check by doing command line $(ps).\n");
+	printf("Check by entering on the command line: ps.\n");
 
 	printf("Before closing file descriptors...\n");
 
-	printf("Disabling file operations by resetting umask to 0.\n");
+	printf("Disable file operations by resetting umask to 0.\n");
 	umask(0);
 
-	printf("Changing working directory to root.\n");
+	printf("Change working directory to root.\n");
 	if (chdir("/") == -1)
 		printf("Error changing current directory to root: %s\n",
 			strerror(errno));
 
-	printf("Detach from terminal and create independent session\n");
-	printf("with child as leader.\n");
+	printf("Detach from terminal and create independent session with child as\n");
+	printf("session leader and process group leader.\n");
 	if (setsid() == -1)
 		printf("Error setting session ID: %s\n", strerror(errno));
+
+	printf("Killing parent.\n");
+	if (kill(parent, SIGKILL))
+		printf("Error killing parent: %s\n", strerror(errno));
 
 	if (close(0) == -1) {
 		printf("Error closing stdin: %s\n", strerror(errno));
@@ -139,6 +151,26 @@ int main(int argc, char **argv)
 	}
 	enumerate_sensors(sensors_module);
 
+	/* Test before daemon mode */
+
+	val.cur_intensity = poll_sensor_data(sensors_device);
+	printf("Polled device with scaled intensity: %i.\n", val.cur_intensity);
+
+	retval = set(&val);
+
+	if (retval)
+		printf("Error[%i] setting: %s.\n", retval, strerror(errno));
+	else
+		printf("Set current light intensity successfully.\n");
+
+	val.cur_intensity = MAX_LI + 1;
+	retval = get(&val);
+
+	if (retval <= 0 || retval >= MAX_LI)
+		printf("Error[%i] getting: %s.\n", retval, strerror(errno));
+	else
+		printf("Got current light intensity successfully.\n");
+
 	daemon_mode();
 
 	while (1) { /* Success */
@@ -179,18 +211,14 @@ static int poll_sensor_data(struct sensors_poll_device_t *sensors_device)
 	if (cur_device == DEVICE) {
 		
 		for (i = 0; i < count; ++i) {
-					if (buffer[i].sensor != effective_sensor)
-							continue;
-				
-		/* You have the intensity here - scale it and send it to your kernel */
-				
-		cur_intensity = buffer[i].light;
-		printf("%f\n", cur_intensity);	
+			if (buffer[i].sensor != effective_sensor)
+				continue;
+			cur_intensity = buffer[i].light;
+			printf("%f\n", cur_intensity);	
 		}
 	}
 
 	else if (cur_device == EMULATOR) {
-
 		/* Same thing again here - pretty bad hack for the emulator */
 		/* Didn't know that the sensor simulator had only temperature but not light */
 		/* cur_intensity has a floating point value that you would have fed to */
