@@ -1,0 +1,70 @@
+srcdiff.txt:75: WARNING: line over 80 characters
+srcdiff.txt:80: WARNING: line over 80 characters
+srcdiff.txt:81: WARNING: line over 80 characters
+srcdiff.txt:126: WARNING: line over 80 characters
+srcdiff.txt:129: WARNING: line over 80 characters
+srcdiff.txt:132: WARNING: line over 80 characters
+srcdiff.txt:179: WARNING: line over 80 characters
+srcdiff.txt:226: ERROR: "foo * bar" should be "foo *bar"
+srcdiff.txt:231: ERROR: "foo * bar" should be "foo *bar"
+srcdiff.txt:273: WARNING: line over 80 characters
+srcdiff.txt:364: ERROR: do not initialise statics to 0 or NULL
+srcdiff.txt:368: ERROR: do not initialise statics to 0 or NULL
+srcdiff.txt:369: ERROR: do not initialise statics to 0 or NULL
+srcdiff.txt:400: ERROR: trailing whitespace
+srcdiff.txt:470: ERROR: space prohibited before that close parenthesis ')'
+srcdiff.txt:507: ERROR: space required before the open parenthesis '('
+srcdiff.txt:512: WARNING: line over 80 characters
+srcdiff.txt:515: WARNING: Prefer [subsystem eg: netdev]_emerg([subsystem]dev, ... then dev_emerg(dev, ... then pr_emerg(...  to printk(KERN_EMERG ...
+srcdiff.txt:536: WARNING: printk() should include KERN_ facility level
+srcdiff.txt:541: WARNING: braces {} are not necessary for any arm of this statement
+srcdiff.txt:568: WARNING: Missing a blank line after declarations
+srcdiff.txt:623: WARNING: printk() should include KERN_ facility level
+srcdiff.txt:637: WARNING: Missing a blank line after declarations
+srcdiff.txt:681: ERROR: spaces required around that '||' (ctx:VxE)
+srcdiff.txt:681: ERROR: space prohibited before that close parenthesis ')'
+srcdiff.txt:711: WARNING: Prefer [subsystem eg: netdev]_warn([subsystem]dev, ... then dev_warn(dev, ... then pr_warn(...  to printk(KERN_WARNING ...
+srcdiff.txt:723: WARNING: Missing a blank line after declarations
+srcdiff.txt:758: ERROR: trailing whitespace
+srcdiff.txt:781: ERROR: trailing whitespace
+srcdiff.txt:814: ERROR: "foo* bar" should be "foo *bar"
+srcdiff.txt:815: ERROR: "foo* bar" should be "foo *bar"
+srcdiff.txt:923: WARNING: line over 80 characters
+srcdiff.txt:932: WARNING: braces {} are not necessary for single statement blocks
+srcdiff.txt:935: WARNING: braces {} are not necessary for single statement blocks
+srcdiff.txt:938: WARNING: braces {} are not necessary for single statement blocks
+srcdiff.txt:944: ERROR: "foo* bar" should be "foo *bar"
+srcdiff.txt:949: ERROR: "foo* bar" should be "foo *bar"
+srcdiff.txt:1003: WARNING: line over 80 characters
+srcdiff.txt:1021: WARNING: line over 80 characters
+srcdiff.txt:1047: WARNING: line over 80 characters
+srcdiff.txt:1074: WARNING: line over 80 characters
+srcdiff.txt:1100: ERROR: trailing whitespace
+srcdiff.txt:1102: WARNING: Missing a blank line after declarations
+srcdiff.txt:1103: ERROR: trailing whitespace
+srcdiff.txt:1104: ERROR: trailing whitespace
+srcdiff.txt:1116: ERROR: "(foo**)" should be "(foo **)"
+srcdiff.txt:1191: WARNING: Missing a blank line after declarations
+srcdiff.txt:1191: WARNING: braces {} are not necessary for any arm of this statement
+srcdiff.txt:1194: WARNING: line over 80 characters
+srcdiff.txt:1198: WARNING: Missing a blank line after declarations
+srcdiff.txt:1198: WARNING: braces {} are not necessary for any arm of this statement
+srcdiff.txt:1201: WARNING: line over 80 characters
+srcdiff.txt:1205: WARNING: Missing a blank line after declarations
+srcdiff.txt:1205: WARNING: braces {} are not necessary for any arm of this statement
+srcdiff.txt:1208: WARNING: line over 80 characters
+srcdiff.txt:1222: WARNING: else is not generally useful after a break or return
+srcdiff.txt:1237: WARNING: line over 80 characters
+srcdiff.txt:1243: WARNING: line over 80 characters
+srcdiff.txt:1245: WARNING: line over 80 characters
+srcdiff.txt:1250: WARNING: line over 80 characters
+srcdiff.txt:1266: WARNING: line over 80 characters
+srcdiff.txt:1267: WARNING: line over 80 characters
+srcdiff.txt:1269: WARNING: else is not generally useful after a break or return
+srcdiff.txt:1271: WARNING: line over 80 characters
+srcdiff.txt:1277: WARNING: line over 80 characters
+srcdiff.txt:1286: WARNING: line over 80 characters
+srcdiff.txt:1289: WARNING: line over 80 characters
+srcdiff.txt:1291: WARNING: else is not generally useful after a break or return
+srcdiff.txt:1292: WARNING: line over 80 characters
+total: 20 errors, 49 warnings, 1249 lines checked
