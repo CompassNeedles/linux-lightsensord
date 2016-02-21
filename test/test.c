@@ -11,11 +11,11 @@
 #define TIME_INTERVAL 1000000
 #define LATENT_PERIOD 500000
 
-#define __NR_get_light_intensity	379
-#define __NR_light_evt_create		380
-#define __NR_light_evt_wait			381
-#define __NR_light_evt_signal		382
-#define __NR_light_evt_destroy		383
+#define __NR_get_light_intensity    379
+#define __NR_light_evt_create       380
+#define __NR_light_evt_wait         381
+#define __NR_light_evt_signal       382
+#define __NR_light_evt_destroy      383
 
 int get(struct light_intensity *kernel_light_intensity)
 {
@@ -120,11 +120,11 @@ int main (void)
 
 			continue; /* child [9] is only meant to signal */
 
-		} else if (n > 5) {		/* 6,7,8 */
+		} else if (n > 5) {     /* 6,7,8 */
 			evt_id = C_id;
-		} else if (n > 2) {		/* 3,4,5 */
+		} else if (n > 2) {     /* 3,4,5 */
 			evt_id = B_id;
-		} else {				/* 0,1,2 */
+		} else {                /* 0,1,2 */
 			evt_id = A_id;
 		}
 
