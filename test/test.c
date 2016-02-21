@@ -43,7 +43,7 @@ int light_evt_destroy(int event_id)
 }
 
 /* Test:
- * Quick (and dirty...)... Lacks unit tests and edge cases.
+ * Quick (and dirty...)... Lacks *unit tests* (and edge cases).
  */
 int main (void)
 {
@@ -160,7 +160,9 @@ int main (void)
 		} else {
 			printf("         Error[%i]: %s.\n", read, strerror(errno));
 		}
-		/* Manually sig-interrupt all other children processes. */
+		/* Manually sig-interrupt all other children processes if you
+		 * are quick enough.
+		 */
 	}
 	/* Wait for children or weird things happen with the command line */
 	if (child_pid > 0) {

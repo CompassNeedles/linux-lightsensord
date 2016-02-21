@@ -22,16 +22,16 @@
 #include "../flo-kernel/include/linux/akm8975.h" 
 #include "light.h"
 
-#define EMULATOR 					0
-#define DEVICE 						1
+#define EMULATOR                    0
+#define DEVICE                      1
 
-#define LIGHT_INTENSITY_SENSOR  	5
+#define LIGHT_INTENSITY_SENSOR      5
 
-#define TIME_INTERVAL   			5000000
-#define MAX_LI  					3276800
+#define TIME_INTERVAL               5000000
+#define MAX_LI                      3276800
 
-#define __NR_set_light_intensity	378
-#define __NR_get_light_intensity	379
+#define __NR_set_light_intensity    378
+#define __NR_get_light_intensity    379
 
 /* Unused: */
 /* Set to 1 for a bit of debug output */

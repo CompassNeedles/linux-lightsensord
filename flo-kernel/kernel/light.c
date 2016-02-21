@@ -14,36 +14,6 @@ static struct light_intensity li_buf[WINDOW];
 static int curr = 0;
 static int nr_readings = 0;
 
-/* Working out a locking strategy:
- * - Set() accesses k_li.
- * - Get() accesses k_li.
- * - Create() accesses events (w).
- * - Signal() acceses k_li (w) and li_buf (rw), and events (r).
- * - Wait() acceses events (r), events[id] (w): ev.queue.
- * - Destroy() accesses events (w).
- *
- * Priorities:
- * - Destroy (events lock: prioritize the write operation).
- * - Signal (li_buf lock:   first writes then reads; concurrency/SMP an
-	issue. Prioritize reading to allow previous call to complete if
-	signal() acquires lock twice - else doesn't matter since signal()
-	is the only function accessing li_buf.
-			 k_li lock:     prioritize the write operation).
- * - Wait (Destroy/Signal both prioritize the write operation).
- * - Create (Again, writing is prioritized).
- *
- * Interrupts:
- * - Destroy should be able to interrupt awakening of queued processes
- *  upon signal. Do not disable signal_event interrupts while/after
- *  signal reads events (abort). It does not matter whether li_buf rw
- *  operations are interruptible on the processor of an event destroy.
- * - Destroy should also be able to interrupt queuing up of processes
- *  on a certain queue (abort).
- * - Wait/Create cannot interrupt signal, etc.
- * To cover all cases define a rule for each pair of functions. This
- * just gives a framework of thought.
- *
- */
 DEFINE_SPINLOCK(li_lock);
 DEFINE_SPINLOCK(ev_lock);
 DEFINE_SPINLOCK(bf_lock);
@@ -168,10 +138,6 @@ SYSCALL_DEFINE1(light_evt_create, struct event_requirements *, intensity_params)
 	events = &ev->ev_h;
 	spin_unlock(&ev_lock);
 
-	/* Could ev be destroyed right before execution of the next line?
-	 * The Linux scheduler is preemptive and hardware interrupts are
-	 * possible. Let's not risk it.
-	 */
 	return retval;
 }
 
@@ -212,8 +178,10 @@ SYSCALL_DEFINE1(light_evt_destroy, int, event_id)
 	struct ev *ev;
 	struct list_head *v = search_event_by_id(event_id);
 
-	if (IS_ERR(v))
+	if (IS_ERR(v)) {
+		printk("Destroy event not found; returning %li.\n", PTR_ERR(v));
 		return PTR_ERR(v);
+	}
 
 	if (events == v) {
 		if (!list_empty(v)) {
@@ -230,10 +198,10 @@ SYSCALL_DEFINE1(light_evt_destroy, int, event_id)
 	 */
 
 	ev = get_event(v);
-	printk("Waking up processes on queue of destroyed event.\n");
+	/* printk("Waking up processes on queue of destroyed event.\n"); */
 	ev->destroyed = 1;
 	wake_up_all(&ev->queue);
-	printk("Woken up.\n");
+	/* printk("Woken up.\n"); */
 	return 0;
 }
 
@@ -255,63 +223,31 @@ static inline int do_wait(struct ev *ev)
 			break;
 		}
 
-		printk("Putting to sleep, evt_id[%i].\n", ev->id);
+		/* printk("Putting to sleep, evt_id[%i].\n", ev->id); */
 		spin_unlock(&ev_lock); /* Unlock before sleep */
 		schedule();
 		spin_lock(&ev_lock); /* Lock while reading event */
-		printk("Checking condition, evt_id[%i].\n", ev->id);
+		/* printk("Checking condition, evt_id[%i].\n", ev->id); */
 	}
 
 	/* With the process being released, decrease the number of references
-	 * to the event.
-	 */
+	 * to the event. */
 	ev->ref_count--;
 
 	if (retval < 1)
 		finish_wait(&ev->queue, &w); /* Else never queued */
+	else
+		retval = 0; /* Reset to turn into valid return value */
 
 	if (ev->ref_count <= 0)
 		ev->no_satisfaction = 1; /* Event is free */
 
-	/* Ref count should never become negative. To make sure though. */
+	/* Ref count should never become negative. To be on the safe side
+	 * it's preferable to cover the entire range of possible values. */
 	if (ev->ref_count <= 0 && ev->destroyed) {
-		printk("Destroying, evt_id[%i].\n", ev->id);
+		/* printk("Destroying, evt_id[%i].\n", ev->id); */
 		kfree(ev); /* Destroy */
 	}
-
-	/* We have two choices/models, which may be racy or lagging. We
-		consider the differences:
-
-		1. Have update_event_stats switch off no_satisfaction (0)
-			indefinitely many times - and during which more
-			processes can attach to the event and wait, until do_wait
-			executes and sets it back to 1. Possible issues:
-			the event requirements may go unsatisfied by the time that
-			the processes in the waitqueue are woken. If events occur
-			in the the meanwhile, the processes are woken up once only
-			and there can be processes waiting to be queued up, which are
-			queued only after the event takes place and the lock is
-			released. In addition to locking, the scheduler determines
-			the order that concurrent processes take place.
-
-		2. Make no_satisfaction negative, and keep waking up events as
-			many times as necessary to make no_satisfaction positive
-			again. Again: as events are being woken, it is possible for
-			the event requirements to become unsatisfactory
-			while others are blocked but about to be woken. This also
-			means that these events are occuring with a possibly
-			significant time lag. However, we make sure at least to wake
-			up processes that are waiting to be queued on the waitqueue,
-			if this can even happen with the way that we lock.
-			Otherwise, these have to wait for the next event, which may
-			not occur for a very long time.
-
-			We could change our implementation, but the way we have it
-			now is so that wait/signal are mutually exclusive but so are
-			two processes wishing to signal. This reduces choice 2 to 
-			choice 1, unless choice 2 is able to wake up processes that
-			sign up to wait on an event before it happens.
-	 */
 
 	spin_unlock(&ev_lock);
 	return retval;
@@ -329,8 +265,10 @@ SYSCALL_DEFINE1(light_evt_wait, int, event_id)
 {
 	struct list_head *v = search_event_by_id(event_id);
 
-	if (IS_ERR(v))
+	if (IS_ERR(v)) {
+		printk("Wait event not found; returning %li.\n", PTR_ERR(v));
 		return PTR_ERR(v);
+	}
 
 	return do_wait(get_event(v));
 }
@@ -386,9 +324,9 @@ static inline int update_event_stats(void)
 		r = ev->reqs;
 
 		if ((r.req_intensity <= largest_event_req_intensity  &&
-			r.frequency     <= its_frequency                )||
+			 r.frequency     <= its_frequency               )||
 			(r.frequency     <= largest_event_frequency      &&
-			r.req_intensity <= its_req_intensity))
+			 r.req_intensity <= its_req_intensity))
 			signal_event = 1;
 		else
 			signal_event = do_count(&r);
@@ -416,7 +354,7 @@ static inline int update_event_stats(void)
 	spin_unlock(&ev_lock);
 
 	if (!v) {
-		printk(KERN_WARNING "No events found to signal an event.\n");
+		printk(KERN_WARNING "No events found to signal.\n");
 		return -EFAULT;
 	}
 
@@ -448,9 +386,11 @@ static inline int update_buffer(int val)
 		updates. This is a tradeoff.
 	 */
 
-	/* We can lock before update_event_stats if we copy the buffer and
+	/* We can unlock before update_event_stats if we copy the buffer and
 		pass it on to update_event_stats (after which we destroy the
-		copy). Overall there is a time-space-accuracy tradeoff.
+		copy). Overall there is a time-space-accuracy tradeoff between
+		all the different options (this, copying and tuning sampling
+		parameters).
 	 */
 	spin_unlock(&bf_lock);
 	return retval;
