@@ -4,11 +4,12 @@
 #include <sys/ioctl.h>
 #include <string.h>
 #include <errno.h>
+#include <wait.h>
 
 #include "light.h"
 
-#define TIME_INTERVAL 3000000
-#define LATENT_PERIOD 1000000
+#define TIME_INTERVAL 1000000
+#define LATENT_PERIOD 500000
 
 #define __NR_get_light_intensity	379
 #define __NR_light_evt_create		380
@@ -42,7 +43,7 @@ int light_evt_destroy(int event_id)
 }
 
 /* Test:
- * Quick (and dirty...)... Lacks unit testing and edge cases.
+ * Quick (and dirty...)... Lacks unit tests and edge cases.
  */
 int main (void)
 {
@@ -51,9 +52,9 @@ int main (void)
 
 
 	/* Define events and have parent create them in kernel */
-	struct event_requirements A = {1400, 5};
-	struct event_requirements B = {600, 7};
-	struct event_requirements C = {300, 3};
+	struct event_requirements A = {500000, 5};
+	struct event_requirements B = {50000, 7};
+	struct event_requirements C = {500, 3};
 
 	int A_id = light_evt_create(&A);
 	if (A_id <= 0) {
@@ -161,7 +162,13 @@ int main (void)
 		}
 		/* Manually sig-interrupt all other children processes. */
 	}
-	/* Don't wait */
+	/* Wait for children or weird things happen with the command line */
+	if (child_pid > 0) {
+		n = -1;
+		while (N--)
+			wait(&n);
+	}
+	printf("PID[%i] exiting forever.\n", getpid());
 	return 0;
 	/* The process signaling remains. */
 }

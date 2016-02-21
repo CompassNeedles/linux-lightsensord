@@ -8,7 +8,7 @@ static struct light_intensity k_li = {
 };
 
 static struct list_head *events = NULL;
-#define get_event(v)		container_of(v, struct ev, ev_h)
+#define get_event(v)        container_of(v, struct ev, ev_h)
 
 static struct light_intensity li_buf[WINDOW];
 static int curr = 0;
@@ -141,13 +141,15 @@ SYSCALL_DEFINE1(light_evt_create, struct event_requirements *, intensity_params)
 		return -EFAULT;
 	}
 
-	if (ev->reqs.req_intensity 	<=	0		||
-		ev->reqs.req_intensity 	>	MAX_LI	||
-		ev->reqs.frequency 		<= 0		||
-		ev->reqs.frequency 		>	WINDOW) {
+	if (ev->reqs.req_intensity  <=  0       ||
+		ev->reqs.req_intensity  >   MAX_LI  ||
+		ev->reqs.frequency      <=  0       ){
 		kfree(ev);
 		return -EINVAL;
 	}
+
+	if (ev->reqs.frequency      >   WINDOW) /* Cap at WINDOW */
+		ev->reqs.frequency = WINDOW;
 
 	if (events)
 		ev->id = get_event(events)->id + 1;
@@ -157,7 +159,8 @@ SYSCALL_DEFINE1(light_evt_create, struct event_requirements *, intensity_params)
 	INIT_LIST_HEAD(&ev->ev_h);
 	init_waitqueue_head(&ev->queue);
 	ev->no_satisfaction = 1;
-	ev->destroy = 0;
+	ev->destroyed = 0;
+	ev->ref_count = 0;
 
 	spin_lock(&ev_lock);
 	if (events)
@@ -189,7 +192,7 @@ static inline struct list_head *search_event_by_id(int event_id)
 			return ERR_PTR(-EINVAL); /* Iterated through entire list */
 
 		} else if (!v) {
-			printk(KERN_CRIT "ERROR LIGHT EVENTS: LIST CORRUPTION.\n");
+			printk(KERN_EMERG "One of the created events is NULL.\n");
 			spin_unlock(&ev_lock);
 			return ERR_PTR(-EFAULT);
 		}
@@ -227,8 +230,10 @@ SYSCALL_DEFINE1(light_evt_destroy, int, event_id)
 	 */
 
 	ev = get_event(v);
-	ev->destroy = 1; /* True */
+	printk("Waking up processes on queue of destroyed event.\n");
+	ev->destroyed = 1;
 	wake_up_all(&ev->queue);
+	printk("Woken up.\n");
 	return 0;
 }
 
@@ -238,8 +243,9 @@ static inline int do_wait(struct ev *ev)
 
 	/* New wait queue entry - works just like list_head. */
 	DEFINE_WAIT(w);
+	ev->ref_count++;
 
-	while (ev->no_satisfaction && !ev->destroy) {
+	while (ev->no_satisfaction && !ev->destroyed) {
 		prepare_to_wait(&ev->queue, &w, TASK_INTERRUPTIBLE);
 		if (retval)
 			retval = 0;
@@ -249,21 +255,29 @@ static inline int do_wait(struct ev *ev)
 			break;
 		}
 
+		printk("Putting to sleep, evt_id[%i].\n", ev->id);
 		spin_unlock(&ev_lock); /* Unlock before sleep */
 		schedule();
 		spin_lock(&ev_lock); /* Lock while reading event */
+		printk("Checking condition, evt_id[%i].\n", ev->id);
 	}
-	if (retval < 1) {
-		finish_wait(&ev->queue, &w); /* Dequeue */
-	}
-	if (ev->destroy)
+
+	/* With the process being released, decrease the number of references
+	 * to the event.
+	 */
+	ev->ref_count--;
+
+	if (retval < 1)
+		finish_wait(&ev->queue, &w); /* Else never queued */
+
+	if (ev->ref_count <= 0)
+		ev->no_satisfaction = 1; /* Event is free */
+
+	/* Ref count should never become negative. To make sure though. */
+	if (ev->ref_count <= 0 && ev->destroyed) {
+		printk("Destroying, evt_id[%i].\n", ev->id);
 		kfree(ev); /* Destroy */
-	else if (retval > -1)
-		ev->no_satisfaction = 1;
-		/* If -EINTR we expect that no_satifaction is equal to 1.
-			as this occurs inside the while loop, we do not modify
-			this value.
-		*/
+	}
 
 	/* We have two choices/models, which may be racy or lagging. We
 		consider the differences:
@@ -272,22 +286,31 @@ static inline int do_wait(struct ev *ev)
 			indefinitely many times - and during which more
 			processes can attach to the event and wait, until do_wait
 			executes and sets it back to 1. Possible issues:
-			update_event_stats may be detecting an event during the
-			execution of do_wait which will then annul the event.
-			Except the lock must be held, which will prevent these events
-			from interfering and data races to occur.
+			the event requirements may go unsatisfied by the time that
+			the processes in the waitqueue are woken. If events occur
+			in the the meanwhile, the processes are woken up once only
+			and there can be processes waiting to be queued up, which are
+			queued only after the event takes place and the lock is
+			released. In addition to locking, the scheduler determines
+			the order that concurrent processes take place.
 
 		2. Make no_satisfaction negative, and keep waking up events as
 			many times as necessary to make no_satisfaction positive
-			again. First consideration: as events are being woken, it is
-			possible for the event requirements to become unsatisfactory
-			while still having processes block and be woken? Second
-			consideration: the events lock must be held which not only makes
-			wait and signal mutually exclusive, but also reduces choice 2
-			to choice 1 since we expect no_satisfaction will simply switch
-			beween values 1 and 0. In other words, no data races between
-			two signalling processes (the second must wait for the first
-			to release the events lock).
+			again. Again: as events are being woken, it is possible for
+			the event requirements to become unsatisfactory
+			while others are blocked but about to be woken. This also
+			means that these events are occuring with a possibly
+			significant time lag. However, we make sure at least to wake
+			up processes that are waiting to be queued on the waitqueue,
+			if this can even happen with the way that we lock.
+			Otherwise, these have to wait for the next event, which may
+			not occur for a very long time.
+
+			We could change our implementation, but the way we have it
+			now is so that wait/signal are mutually exclusive but so are
+			two processes wishing to signal. This reduces choice 2 to 
+			choice 1, unless choice 2 is able to wake up processes that
+			sign up to wait on an event before it happens.
 	 */
 
 	spin_unlock(&ev_lock);
@@ -392,8 +415,10 @@ static inline int update_event_stats(void)
 	}
 	spin_unlock(&ev_lock);
 
-	if (!v)
+	if (!v) {
+		printk(KERN_WARNING "No events found to signal an event.\n");
 		return -EFAULT;
+	}
 
 	return 0;
 }
@@ -462,7 +487,7 @@ SYSCALL_DEFINE1(light_evt_signal, struct light_intensity __user *,
 	update_value = copy_from_user(&k_li, user_light_intensity, 
 			sizeof(struct light_intensity));
 
-	if (!update_value) {
+	if (update_value) {
 		spin_unlock(&li_lock);
 		return -EFAULT;
 	}

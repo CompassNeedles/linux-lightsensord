@@ -42,7 +42,8 @@ struct event_requirements {
             will be attached, as a list_head entry
         .no_satisfaction: indicates that the event requirements have not
             yet been met
-        .destroy: indicates that the event should be destroyed when woken
+        .destroyed: used to signal event is destroyed
+        .ref_count: used to signal when the event is safe to destroy
     }
 */
 struct ev {
@@ -51,7 +52,8 @@ struct ev {
     struct list_head ev_h;
     wait_queue_head_t queue;
     int no_satisfaction;
-    int destroy;
+    int destroyed;
+    int ref_count;
 };
 
 #endif

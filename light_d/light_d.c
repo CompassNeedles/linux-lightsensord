@@ -27,7 +27,7 @@
 
 #define LIGHT_INTENSITY_SENSOR  	5
 
-#define TIME_INTERVAL   			2000000
+#define TIME_INTERVAL   			5000000
 #define MAX_LI  					3276800
 
 #define __NR_set_light_intensity	378
@@ -213,16 +213,17 @@ static int poll_sensor_data(struct sensors_poll_device_t *sensors_device)
 
 	int i;
 	if (cur_device == DEVICE) {
-		
+		printf("DEVICE\n");
 		for (i = 0; i < count; ++i) {
 			if (buffer[i].sensor != effective_sensor)
 				continue;
 			cur_intensity = buffer[i].light;
-			printf("%f\n", cur_intensity);	
+			printf("%f\n", cur_intensity);
 		}
 	}
 
 	else if (cur_device == EMULATOR) {
+		printf("EMULATOR\n");
 		/* Same thing again here - pretty bad hack for the emulator */
 		/* Didn't know that the sensor simulator had only temperature but not light */
 		/* cur_intensity has a floating point value that you would have fed to */
