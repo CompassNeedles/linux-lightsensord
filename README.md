@@ -15,4 +15,4 @@ It tests all system calls at once which is obviously not the cleanest way.
 Testing done on the emulator using fake light sensor data rather than
 actual device.
 
-To do: return the appropriate message on error from the kernel - test on device
+To do: return the appropriate messages on error from the kernel - test on device
