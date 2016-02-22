@@ -112,13 +112,13 @@ SYSCALL_DEFINE1(light_evt_create, struct event_requirements *, intensity_params)
 	}
 
 	if (ev->reqs.req_intensity  <=  0       ||
-		ev->reqs.req_intensity  >   MAX_LI  ||
-		ev->reqs.frequency      <=  0       ){
+	    ev->reqs.req_intensity  >   MAX_LI  ||
+	    ev->reqs.frequency      <=  0       ){
 		kfree(ev);
 		return -EINVAL;
 	}
 
-	if (ev->reqs.frequency      >   WINDOW) /* Cap at WINDOW */
+	if (ev->reqs.frequency > WINDOW) /* Cap at WINDOW */
 		ev->reqs.frequency = WINDOW;
 
 	if (events)
@@ -198,10 +198,8 @@ SYSCALL_DEFINE1(light_evt_destroy, int, event_id)
 	 */
 
 	ev = get_event(v);
-	/* printk("Waking up processes on queue of destroyed event.\n"); */
 	ev->destroyed = 1;
 	wake_up_all(&ev->queue);
-	/* printk("Woken up.\n"); */
 	return 0;
 }
 
@@ -222,12 +220,9 @@ static inline int do_wait(struct ev *ev)
 			retval = -EINTR;
 			break;
 		}
-
-		/* printk("Putting to sleep, evt_id[%i].\n", ev->id); */
 		spin_unlock(&ev_lock); /* Unlock before sleep */
 		schedule();
 		spin_lock(&ev_lock); /* Lock while reading event */
-		/* printk("Checking condition, evt_id[%i].\n", ev->id); */
 	}
 
 	/* With the process being released, decrease the number of references
@@ -244,10 +239,8 @@ static inline int do_wait(struct ev *ev)
 
 	/* Ref count should never become negative. To be on the safe side
 	 * it's preferable to cover the entire range of possible values. */
-	if (ev->ref_count <= 0 && ev->destroyed) {
-		/* printk("Destroying, evt_id[%i].\n", ev->id); */
+	if (ev->ref_count <= 0 && ev->destroyed)
 		kfree(ev); /* Destroy */
-	}
 
 	spin_unlock(&ev_lock);
 	return retval;
@@ -324,9 +317,9 @@ static inline int update_event_stats(void)
 		r = ev->reqs;
 
 		if ((r.req_intensity <= largest_event_req_intensity  &&
-			 r.frequency     <= its_frequency               )||
-			(r.frequency     <= largest_event_frequency      &&
-			 r.req_intensity <= its_req_intensity))
+		     r.frequency     <= its_frequency               )||
+		    (r.frequency     <= largest_event_frequency      &&
+		     r.req_intensity <= its_req_intensity))
 			signal_event = 1;
 		else
 			signal_event = do_count(&r);
@@ -337,12 +330,12 @@ static inline int update_event_stats(void)
 			wake_up_all(&ev->queue);
 
 			if (r.req_intensity <=  largest_event_req_intensity &&
-				r.frequency     >   its_frequency)
+			    r.frequency     >   its_frequency)
 
 				its_frequency = r.frequency;
 
 			if (r.frequency     <=  largest_event_frequency     &&
-				r.req_intensity >   its_req_intensity)
+			    r.req_intensity >   its_req_intensity)
 
 				its_req_intensity = r.req_intensity;
 		}
