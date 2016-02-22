@@ -12,7 +12,7 @@ flo-kernel/include/linux/light.h
 
 A "holistic" test is provided in test/
 It tests all system calls at once which is obviously not the cleanest way.
-Testing done on the emulator using fake light sensor data rather than
-actual device.
+Testing done on the emulator (uniprocessor) using fake light sensor data rather than
+actual device (no SMP).
 
 To do: return the appropriate messages on error from the kernel - test on device
