@@ -361,7 +361,10 @@ static inline int update_buffer(int val)
 	int retval;
 	spin_lock(&bf_lock);
 
-	/* How easy would it be to turn this into a fixed size BST */
+	/* How easy would it be to turn this into a fixed size BST
+	 * or better yet also use a Linux tree for events which can
+	 * be unlimited in number.
+	 */
 	curr = (curr + 1) % WINDOW;
 	li_buf[curr].cur_intensity = val;
 
