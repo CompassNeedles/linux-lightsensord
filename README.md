@@ -1,7 +1,5 @@
 Author: Sami Mourad
 
-Please check out Repository Website for instructions.
-
 Implements an Android daemon process to write light sensor data to the kernel.
 This is contained in light_d/
 
